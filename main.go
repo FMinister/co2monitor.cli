@@ -1,8 +1,5 @@
 package main
 
-// A simple example that shows how to send activity to Bubble Tea in real-time
-// through a channel.
-
 import (
 	"fmt"
 	"net/http"
@@ -13,19 +10,20 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/joho/godotenv"
 )
 
-type ResponseMsg struct {
-	Status int
-	Data   Co2DataDto
-	Err    error
+type responseMsg struct {
+	status int
+	data   Co2DataDto
+	err    error
 }
 
 func listenForActivity(sub chan struct{}) tea.Cmd {
 	return func() tea.Msg {
 		for {
-			time.Sleep(time.Millisecond * 100) // nolint:gosec
+			time.Sleep(time.Millisecond * 100)
 			sub <- struct{}{}
 		}
 	}
@@ -33,12 +31,11 @@ func listenForActivity(sub chan struct{}) tea.Cmd {
 
 func waitForActivity(sub chan struct{}, m model) tea.Cmd {
 	return func() tea.Msg {
-		if m.response.Status == 0 {
-			fmt.Println("No response yet")
+		if m.response.status == 0 {
 			return checkServer()
 		}
 
-		time.Sleep(time.Second * 10)
+		time.Sleep(time.Second * 60)
 		<-sub
 		return checkServer()
 	}
@@ -51,10 +48,10 @@ func checkServer() tea.Msg {
 	req.Header.Set("X-API-KEY", apiKey)
 	resp, err := client.Do(req)
 	if err != nil {
-		return ResponseMsg{
-			Status: 0,
-			Data:   Co2DataDto{},
-			Err:    fmt.Errorf("Error: %s", err),
+		return responseMsg{
+			status: 0,
+			data:   Co2DataDto{},
+			err:    fmt.Errorf("Error: %s", err),
 		}
 	}
 	defer client.CloseIdleConnections()
@@ -63,23 +60,23 @@ func checkServer() tea.Msg {
 		var data Co2DataDto
 		err := json.NewDecoder(resp.Body).Decode(&data)
 		if err != nil {
-			return ResponseMsg{
-				Status: http.StatusInternalServerError,
-				Data:   Co2DataDto{},
-				Err:    fmt.Errorf("Error: %s", err),
+			return responseMsg{
+				status: http.StatusInternalServerError,
+				data:   Co2DataDto{},
+				err:    fmt.Errorf("Error: %s", err),
 			}
 		}
-		return ResponseMsg{
-			Status: resp.StatusCode,
-			Data:   data,
-			Err:    nil,
+		return responseMsg{
+			status: resp.StatusCode,
+			data:   data,
+			err:    nil,
 		}
 	}
 
 	return nil
 }
 
-func LoadEnvVariables() {
+func loadEnvVariables() {
 	err := godotenv.Load()
 	if err != nil {
 		fmt.Println("Error loading .env file")
@@ -88,7 +85,7 @@ func LoadEnvVariables() {
 
 type model struct {
 	sub      chan struct{}
-	response ResponseMsg
+	response responseMsg
 	spinner  spinner.Model
 	quitting bool
 }
@@ -112,8 +109,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		m.quitting = true
 		return m, tea.Quit
-	case ResponseMsg:
-		m.response = msg.(ResponseMsg)
+	case responseMsg:
+		m.response = msg.(responseMsg)
 		return m, waitForActivity(m.sub, m) // wait for next event
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -125,7 +122,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	s := fmt.Sprintf("\n %s CO2: %d; Temp: %.1f; %s \n\n Press any key to exit\n", m.spinner.View(), m.response.Data.CO2, m.response.Data.Temp, m.response.Data.CreatedAt.Format("2006-01-02 15:04:05"))
+	var s string
+	if m.response.err != nil {
+		s = fmt.Sprintf("\n %s Error: %s; %s", m.spinner.View(), m.response.err.Error(), time.Now().Format("2006-01-02 15:04:05"))
+	} else {
+		s = fmt.Sprintf("\n %s CO2: %d; Temp: %.1f; %s", m.spinner.View(), m.response.data.CO2, m.response.data.Temp, m.response.data.CreatedAt.Format("2006-01-02 15:04:05"))
+	}
+	s += lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("\n\nPress any key to exit\n")
 	if m.quitting {
 		s += "\n"
 	}
@@ -133,11 +136,15 @@ func (m model) View() string {
 }
 
 func main() {
-	LoadEnvVariables()
-	p := tea.NewProgram(model{
-		sub:     make(chan struct{}),
-		spinner: spinner.New(),
-	})
+	loadEnvVariables()
+
+	m := model{}
+	m.spinner = spinner.New()
+	m.spinner.Spinner = spinner.Globe
+	m.spinner.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#00b8f5"))
+	m.sub = make(chan struct{})
+
+	p := tea.NewProgram(m)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Println("could not start program:", err)
