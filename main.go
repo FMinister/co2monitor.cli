@@ -43,8 +43,9 @@ func waitForActivity(sub chan struct{}, m model) tea.Cmd {
 
 func checkServer() tea.Msg {
 	apiKey := os.Getenv("X_API_KEY")
+	apiUrl := os.Getenv("API_URL")
 	client := &http.Client{}
-	req, _ := http.NewRequest("GET", "https://co2.leyrer.io/api/co2data/1/latest", nil)
+	req, _ := http.NewRequest("GET", apiUrl, nil)
 	req.Header.Set("X-API-KEY", apiKey)
 	resp, err := client.Do(req)
 	if err != nil {
